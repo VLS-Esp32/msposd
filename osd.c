@@ -91,7 +91,7 @@ typedef struct msp_cache_entry_s {
 
 static msp_cache_entry_t *msp_message_cache[256]; // make a slot for all possible messages
 
-static uint8_t frame_buffer[1024]; // buffer a whole frame of MSP commands until we get a
+static uint8_t frame_buffer[1400]; // buffer a whole frame of MSP commands until we get a
 								   // draw command. needs to fit in UDP !
 static uint32_t fb_cursor = 0;
 
@@ -186,9 +186,16 @@ static void send_version_request(int serial_fd) {
 	write(serial_fd, &buffer, sizeof(buffer));
 }
 
-static void copy_to_msp_frame_buffer(void *buffer, uint16_t size) {
-	memcpy(&frame_buffer[fb_cursor], buffer, size);
-	fb_cursor += size;
+void copy_to_msp_frame_buffer(const uint8_t *data, size_t size)
+{
+    // Check if the data fits into the remaining buffer space
+    if (fb_cursor + size >= 1400) {
+        fprintf(stderr, "Frame buffer overflow prevented! Dropping %zu bytes.\n", size);
+        return;
+    }
+
+    memcpy(&frame_buffer[fb_cursor], data, size);
+    fb_cursor += size;
 }
 
 // int displayport_process_message(displayport_vtable_t *display_driver,
@@ -429,7 +436,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	stat_msp_msgs++;
 
 	// We will forward ALL MSP traffic, not only DisplayPort
-	if (fb_cursor > sizeof(frame_buffer)) {
+	if (fb_cursor > sizeof(frame_buffer) - 256) { //Some margin for stability
 		if (out_sock > 0) {
 			printf("Exhausted frame buffer! Flushing...\n");
 			sendto(

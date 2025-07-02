@@ -49,7 +49,8 @@ EOL
 fi
 
 if [ "$(uname -m)" = "x86_64" ]; then
-    sudo chroot aarch64 make OUTPUT=msposd_$1 $1 -C /usr/src/msposd
+    OUTPUT_PATH="/usr/src/msposd/msposd_$1"
+    sudo chroot aarch64 make OUTPUT=$OUTPUT_PATH $1 -C /usr/src/msposd
 else
     make OUTPUT=$OUT $1
 fi
