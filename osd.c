@@ -2502,6 +2502,7 @@ static void InitMSPHook() {
 			set_bitmap(osds[FULL_OVERLAY_ID].hand,
 				&bitmap); // bitmap must match region dimensions!
 #elif defined(_x86) || defined(__ROCKCHIP__)
+/*
 			// sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
 
 			unsigned char *rgbaData =
@@ -2520,7 +2521,8 @@ static void InitMSPHook() {
 			free(rgbaData);
 			// cairo_surface_destroy(image_surface);
 			// image_surface = NULL;
-
+*/
+		
 #endif
 			// free(bitmap.pData);
 		} else { // no font file still, show message on screen
