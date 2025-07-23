@@ -171,6 +171,8 @@ void copyRectI4(uint8_t *srcBitmap, uint32_t srcWidth, uint32_t srcHeight, uint8
 
 int getRowStride(int width, int BitsPerPixel);
 
+uint16_t GetARGB1555From_RGN_Palette(int index);
+
 #define COLOR_RED 1
 #define COLOR_GREEN 2
 #define COLOR_BLUE 3
@@ -179,12 +181,13 @@ int getRowStride(int width, int BitsPerPixel);
 #define COLOR_CYAN 6
 #define COLOR_WHITE 7
 #define COLOR_BLACK 8
-#define COLOR_GRAY_Darker 9
+#define COLOR_SEMI_TRANSPARENT 9
 #define COLOR_GRAY_Darkest 10
 #define COLOR_GRAY_Medium 11
 #define COLOR_GRAY_Lighter 12
 #define COLOR_GRAY_Light 13
 #define COLOR_GRAY_Dark 14
+#define COLOR_TRANSPARENT 15
 
 /*
 	{0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)

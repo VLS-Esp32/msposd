@@ -395,7 +395,7 @@ static bool InjectChars(char *payload) {
 			// return true;
 		}
 
-		// set extra temp on screen
+		// set extra temp on screen !TMW!
 		if (str[0] == '!' && str[1] == 'T' && str[2] == 'M' && str[3] == 'W' && str[4] == '!') {
 			int temp = 99;
 
@@ -510,11 +510,10 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 	case MSP_CMD_DISPLAYPORT: {
 		if (msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
-			msp_message->payload[255] = 0; // just in case
+			//msp_message->payload[255] = 0; // just in case. why, may crash ?! 
+			
 			strcpy(air_unit_info_msg, &msp_message->payload[1]);
-			// printf("payload: %s\n", &msp_message->payload[1]);
-			// printf("air_unit_info_msg: %s\n", air_unit_info_msg);
-			fill(air_unit_info_msg);
+			fill(air_unit_info_msg);//Strip font settings from the text and set color, alignment , size etc 
 			// printf("fill: %s\n", air_unit_info_msg);
 		}
 
@@ -755,7 +754,7 @@ static void draw_AHI() {
 	Transform_OVERLAY_WIDTH = OVERLAY_WIDTH;
 	Transform_OVERLAY_HEIGHT = OVERLAY_HEIGHT;
 	Transform_Pitch = last_pitch / 10;
-	Transform_Roll = -last_roll / 10;
+	Transform_Roll = -last_roll / 10;	
 
 	Point img_center = {OVERLAY_WIDTH / 2, OVERLAY_HEIGHT / 2}; // Center of the image (example)
 	Point original_point = {600, 500};							// Example point
@@ -793,14 +792,16 @@ static void draw_Ladder() {
 	const bool horizonInvertPitch = false;
 	const bool horizonInvertRoll = false;
 	double horizonWidth = 3;
-	const int horizonSpacing = 165; //????//pixels per degree 165
+	const int horizonSpacing = 150; // This is the zoom level of the vertical axis that AHI will be drawn with, Need to be adjusted for the lens FO
+									// So that the AHI follows the horizon when changing pitch angle
 	const bool horizonShowLadder = true;
-	int horizonRange = 80;					  // total vertical range in degrees
+	int horizonRange = 75;					  // total vertical range that the AHI will be drawn over in degrees
 	const int horizonStep = 10;				  //????//degrees per line
 	const bool show_center_indicator = false; ////m_show_center_indicator;
 
 	const double ladder_stroke_faktor = 0.1;
 	const int subline_thickness = 1;
+	double K_AHI_Step = 0.5;
 
 	if (OVERLAY_HEIGHT < 900) { // 720p mode
 		horizonWidth = 2;
@@ -819,7 +820,7 @@ static void draw_Ladder() {
 
 	const int pos_x = OVERLAY_WIDTH / 2;
 	const int pos_y = (OVERLAY_HEIGHT / 2) + TiltY;
-	const int width_ladder = 100 * horizonWidth;
+	const int width_ladder = 80 * horizonWidth;
 
 	int px = pos_x - width_ladder / 2;
 
@@ -869,33 +870,24 @@ static void draw_Ladder() {
 			i = i + 30 / ratio;
 
 		k = i * step;
-		y = pos_y - (i - 1.0 * pitch_degree / step) * ratio;
+		y = pos_y - (i - K_AHI_Step * pitch_degree / step) * ratio;
+		
+		//sin((Transform_Pitch) * (M_PI / 180.0))
 		if (horizonShowLadder == true) {
 			if (i != 0) {
-
 				// fix pitch line wrap around at extreme nose up/down
 				n = k; // this is the line index number relative to the main
 					   // one.
-				if (n > 90) {
-					n = 180 - k;
-				}
-
-				if (n < -90) {
-					n = -k - 180;
-				}
+				if (n > 90) 
+					n = 180 - k;				
+				if (n < -90) 
+					n = -k - 180;				
 
 				if (abs(n) > 20) // pitch higher than 30 degree.
 					m_color = COLOR_YELLOW;
 				if (abs(n) > 40) // pitch higher than 30 degree.
 					m_color = COLOR_RED;
 
-				// left numbers
-				// painter->setPen(m_color);
-				// painter->drawText(px-30, y+6, QString::number(n));
-
-				// right numbers
-				// painter->drawText((px + width_ladder)+8, y+6,
-				// QString::number(n)); painter->setPen(m_color);
 
 				if ((i > 0)) {
 					// Upper ladders
@@ -903,114 +895,84 @@ static void draw_Ladder() {
 					int stroke_s = 2 * ladder_stroke_faktor;
 
 					// left upper cap
-					// drawRectangleI4(bmpBuff.pData, px , y , stroke_s ,
-					// width_ladder/24, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px, y + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// left upper line
-					// drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 ,
-					// stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px + width_ladder / 3, y, m_color,
 						subline_thickness); // Top side
 
 					// right upper cap
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y ,
-					// px+width_ladder-2 + stroke_s , width_ladder/24,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder - 2, y, px + width_ladder - 2,
 						y + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// right upper line
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y ,
-					// width_ladder/3 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder * 2 / 3, y,
 						(px + width_ladder * 2 / 3) + width_ladder / 3 - 1, y, m_color,
 						subline_thickness); // Top side
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150) {
+					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 12, y + 8,
-							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
 					}
 #endif
 
 				} else if (i < 0) {
 					// Lower ladders
 					// default to stroke strength of 2 (I think it is pixels)
-
 					int stroke_s = 2 * ladder_stroke_faktor;
 
 					// left to right
 					// left lower cap
-					// drawRectangleI4(bmpBuff.pData, px, y-(width_ladder/24)+2
-					// , stroke_s , width_ladder/24, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y - (width_ladder / 24) + 2, px,
 						y - (width_ladder / 24) + 1 + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// 1l
-					// drawRectangleI4(bmpBuff.pData, px , y , width_ladder/12 ,
-					// stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 2l
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*1.5 ,
-					// y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 1.5, y,
 						px + (width_ladder / 12) * 1.5 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 3l
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*3 , y
-					// , width_ladder/12 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 3, y,
 						px + (width_ladder / 12) * 3 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// right lower cap
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder-2 ,
-					// y-(width_ladder/24)+2 , stroke_s , width_ladder/24,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder - 2, y - (width_ladder / 24) + 2,
 						px + width_ladder - 2, y - (width_ladder / 24) + 1 + width_ladder / 24,
 						m_color,
 						subline_thickness); // Top side
 
 					// 1r ///spacing on these might be a bit off
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*8 , y
-					// , width_ladder/12 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 8, y,
 						px + (width_ladder / 12) * 8 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 2r ///spacing on these might be a bit off
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*9.5 ,
-					// y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 9.5, y,
 						px + (width_ladder / 12) * 9.5 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 3r  ///spacing on these might be a bit off tried a
-					// decimal here drawRectangleI4(bmpBuff.pData,
-					// px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder * .9166), y,
 						px + (width_ladder * .9166) + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150) {
+					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 16, y + 4,
-							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
 					}
 #endif
 				}
@@ -1022,7 +984,7 @@ static void draw_Ladder() {
 
 				int rect_height = 5; // Height of the rectangles (as per your original code)
 				int fragments = 6;
-				float SpacingK = 0.6;
+				float SpacingK = 0.4;
 				// int rect_width = (width_ladder*2.5/(fragments +
 				// (float)SpacingK*fragments));  // Width of a single rectangle
 				int rect_width =
@@ -1159,7 +1121,77 @@ static void draw_Ladder() {
 	} // draw ladder
 }
 
+
+/* ChatGPT
+Takes a multi-line string as input.
+Counts how many lines it contains.
+For each line, extracts the values prefixed by &L and &F
+*/
+int parse_LF(const char *input, int *L, int *F, int max_lines) {
+    const char *ptr = input;
+    int line_count = 0;
+
+    while (*ptr && line_count < max_lines) {
+        char line[512] = {0};
+        int len = 0;
+
+        // Extract a single line
+        while (*ptr && *ptr != '\n' && len < sizeof(line) - 1) {
+            line[len++] = *ptr++;
+        }
+        if (*ptr == '\n') ptr++;  // skip newline
+        line[len] = '\0';
+
+        // Find &L and &F
+        char *l_ptr = strstr(line, "&L");
+        char *f_ptr = strstr(line, "&F");
+
+        if (l_ptr) {
+            L[line_count] = atoi(l_ptr + 2);            
+        } else {
+            L[line_count] = -1;           
+        }
+		if (f_ptr) {            
+            F[line_count] = atoi(f_ptr + 2);
+        } else {            
+            F[line_count] = -1;
+        }
+
+
+        line_count++;
+    }
+
+    return line_count;
+}
+
+/* We use some predefined color indexes and need to keep them for compatibility
+0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan,  8 - semi-transparent, 9 - transparent
+*/
+int I4ColorIndex(int msg_colour) {
+
+//	if (msg_colour  == 8)//9
+//		return COLOR_SEMI_TRANSPARENT;		
+//	if (msg_colour  == 9)//
+//		return COLOR_TRANSPARENT;		
+
+	if (msg_colour  == 8)//9
+		return 12;	//Orchid	
+	if (msg_colour  == 9)//
+		return 10;	
+	
+	if (msg_colour == 0)
+		msg_colour = COLOR_WHITE;
+	else if (msg_colour == 1)
+		msg_colour = COLOR_BLACK;
+	else
+		//index in palette  1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan, 
+		msg_colour--;	
+
+	return msg_colour;
+}
+
 static int droppedTTL = 0;
+static int droppedTTL_start=0;
 static bool first_wfb_read = true;
 
 void fill(char *str) {
@@ -1277,21 +1309,37 @@ void fill(char *str) {
 			ipos++;
 			char c[80];
 			monitor_wfb = true;
-			int dropped = SendWfbLogToGround();
-			if (first_wfb_read) {
-				dropped = 0;
-				droppedTTL = 0;
+			int dropped;
+			int droppedTTL_last = 0;
+
+			// --- Get 8812xx Dropped Count.
+			const char *tx_dropped_path = "/sys/class/net/wlan0/statistics/tx_dropped";
+			FILE *fp = fopen(tx_dropped_path, "r");
+			if (fp) {
+				if (fscanf(fp, "%d", &droppedTTL_last) != 1)
+					fprintf(stderr, "Failed to read integer from %s\n", tx_dropped_path);
+				fclose(fp);
+				dropped = first_wfb_read ? 0 : (droppedTTL_last - droppedTTL);
+				droppedTTL = droppedTTL_last;
+			} else {
+				dropped = SendWfbLogToGround();
+				if (first_wfb_read) {
+					dropped = 0;
+					droppedTTL = 0;
+				}
+
+				droppedTTL += dropped;
 			}
 
 			first_wfb_read = false;
-			droppedTTL += dropped;
+
 			// Print the value with one digit after the decimal point
 			if (dropped == 0)
-				sprintf(c, "d=%d", droppedTTL);
+				sprintf(c, "(%d)", droppedTTL);
 			else {
-				sprintf(c, "+ %d ! Dropped=%d ", dropped, droppedTTL);
+				sprintf(c, "+%d!(%d) ", dropped, droppedTTL);
 				if (verbose)
-					printf("WFB_NG Dropped UDP packets: %d\n", dropped);
+					printf("WiFi Dropped UDP packets: %d\n", dropped);
 			}
 			strcat(out, c);
 			opos += strlen(c);
@@ -1333,7 +1381,7 @@ void fill(char *str) {
 			opos += strlen(c);
 
 		} else if (str[ipos + 1] == 'F' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
-			if (!DrawOSD) {
+			if (!DrawOSD) { // we need to keep &Fxx , it is needed for the ground
 				strncat(out, str + ipos, 1);
 				opos++;
 			} else {
@@ -1355,14 +1403,7 @@ void fill(char *str) {
 				int value = atoi(numStr);
 				// Ugly
 				msg_layout = value % 10;
-				msg_colour = value / 10;
-				if (msg_colour == 0)
-					msg_colour = COLOR_WHITE;
-				else if (msg_colour == 1)
-					msg_colour = COLOR_BLACK;
-				else
-					// 1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan
-					msg_colour--;
+				msg_colour=I4ColorIndex(value / 10);				 
 
 				ipos += 3;
 			}
@@ -1515,9 +1556,13 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		LastOSDMsgParsed = timems; // Do not parse and read variable too often
 
 		strcpy(out, osdmsg);
-		// sprintf(out,"$M $B Size: %d",(int)osds[FULL_OVERLAY_ID].size);
-		// osds[FULL_OVERLAY_ID].size=18+((cntr/10)%10);//TEST
+		int L[20]={0}, F[20]={0};  // Support up to 20 lines
+
 		if (strstr(out, "&")) {
+			//Allow for color and size setting per line, must be here since the fill() function will strip that info 			
+			if (DrawOSD)//Only on the air unit
+    			parse_LF(out, L, F, 20);
+
 			fill(out);
 			osds[FULL_OVERLAY_ID].updt = 0; //
 		}
@@ -1528,7 +1573,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		if (!DrawOSD && out_sock > 0) { // send the line to the ground
 			static uint8_t msg_buffer[MAX_STATUS_MSG_LEN + 6];
 			static uint8_t payload_buffer[MAX_STATUS_MSG_LEN];
-			out[MAX_STATUS_MSG_LEN-1] = 0; // just in case
+			out[MAX_STATUS_MSG_LEN-1] = 0; // just in case.
 			int msglen = strlen(&out[0]);
 
 			payload_buffer[0] = MSP_DISPLAYPORT_INFO_MSG;
@@ -1562,28 +1607,47 @@ bool DrawTextOnOSDBitmap(char *msg) {
 
 		split_lines(out, lines, &line_count); // Here we will modify the message
 		int maxwidth = 0;
-
+		int heighttl = 0;
 		for (int i = 0; i < line_count; i++) {
 			// printf("OSD Statistics Line %d: %s\n", i + 1, lines[i]);
+			// If we've extracted font size info per line
+			if (F[i] > 0)
+				osds[FULL_OVERLAY_ID].size = F[i];
 			rect = measure_text(font, osds[FULL_OVERLAY_ID].size, lines[i]);
 			maxwidth = (rect.width > maxwidth) ? rect.width : maxwidth;
+			heighttl += (int)(rect.height*0.9) /*- ((rect.height>40)?1:0)*/;
 		}
+		heighttl+=2;
 
-		bitmapText.u32Height = line_count * rect.height; // preview_height;//rows *
+		bitmapText.u32Height = heighttl; // line_count * rect.height;
 		bitmapText.u32Width = MIN((maxwidth + 15) & ~15,
 			bmpBuff.u32Width - 16); // should be multiple of 16 OVERLAY_WIDTH-16
 		bitmapText.pData =
 			(unsigned char *)malloc(bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 		memset(bitmapText.pData, 0, bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 
+		heighttl = 0;
 		for (int i = 0; i < line_count; i++) {
-			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size,
-				lines[i]); // allocates new bitmap, Bus error on goke ?!
+
+			if (F[i] > 0)
+				osds[FULL_OVERLAY_ID].size = F[i];
+
+			uint16_t color = 0xFFFF;
+			if (L[i] > 0) {
+				msg_colour = I4ColorIndex(L[i] / 10);
+				color = GetARGB1555From_RGN_Palette(msg_colour);
+			}
+
+			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size, lines[i],
+				color // Create in the desired color instead of  converting it later!
+			);		  // allocates new bitmap, Bus error on goke ?!
 			// raster_text always return argb1555
 			copyRectARGB1555(bitmapTextLine.pData, bitmapTextLine.u32Width,
 				bitmapTextLine.u32Height, bitmapText.pData, bitmapText.u32Width,
 				bitmapText.u32Height, 0, 0, MIN(bitmapTextLine.u32Width, bitmapText.u32Width),
-				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, i * rect.height);
+				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, heighttl);
+
+			heighttl += (int)(bitmapTextLine.u32Height * 0.9);
 			free(bitmapTextLine.pData); // Free the memory allocated by raster_text !!!
 		}
 
@@ -1595,7 +1659,8 @@ bool DrawTextOnOSDBitmap(char *msg) {
 								  getRowStride(bitmapText.u32Width, PIXEL_FORMAT_BitsPerPixel));
 
 			convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,
-				destBitmap, msg_colour, msg_colour_background);
+				destBitmap, (L[0] > 0) ? -1 : msg_colour,
+				msg_colour_background); // If different color per line is used
 
 			free(bitmapText.pData); // free ARGB1555 bitmap
 			// This is inefficient, we use 4 times more memory, but the buffer
@@ -2305,13 +2370,13 @@ static void InitMSPHook() {
 	PIXEL_FORMAT_BitsPerPixel = 4;
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
-	// enable this to simulate I4 Bitmap Processing on SigmaStar
-	// PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
-	// PIXEL_FORMAT_BitsPerPixel = 4;
+	// enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
+	 PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
+	 PIXEL_FORMAT_BitsPerPixel = 4;
 
 	// Default 32 bit rendering on the ground
-	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
-	PIXEL_FORMAT_BitsPerPixel = 32;
+	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
+	//PIXEL_FORMAT_BitsPerPixel = 32;
 #endif
 
 	if (!majestic_width && !majestic_height) {
@@ -2344,8 +2409,8 @@ static void InitMSPHook() {
 	OVERLAY_WIDTH = current_display_info.font_width *
 					(current_display_info.char_width); // must be multiple of 8 !!!
 	OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
-	if (matrix_size > 10 && OVERLAY_WIDTH < (1920 - (53 * 2))) {
-		printf("Matrix size not supported on resolutions smaller than 1920x1080p!\n");
+	if (matrix_size == 11 && OVERLAY_WIDTH < (1920 - (53 * 2))) {
+		printf("Matrix size 11 not supported on resolutions smaller than 1920x1080p!\n");
 		matrix_size = 0;
 	}
 	/*
