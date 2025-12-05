@@ -2,6 +2,7 @@ mavfwd
 tmp/**
 toolchain/
 /*.png
+.vscode/
 majestic.yaml
 /msposd
 firmware/
@@ -17,3 +18,4 @@ msposd
 msposd_rockchip
 version.h
 serial_monitor.c
+.DS_Store
