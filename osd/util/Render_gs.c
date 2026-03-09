@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdatomic.h>
 
 #include <X11/keysym.h>
 #include <event2/event.h>
@@ -25,17 +26,28 @@ Window RootWindow;
 
 #if defined(__ROCKCHIP__)
 #define SHM_NAME "msposd"
+#define NUMBER_BUFFERS 3
 
 // Define the shared memory region structure
 typedef struct {
-	uint16_t width;		  // Image width
-	uint16_t height;	  // Image height
-	unsigned char data[]; // Flexible array for image data
+    uint16_t width;       // Image width
+    uint16_t height;      // Image height
+    uint32_t stride;      // Number of bytes per image row
+    uint8_t refresh_rate; // Refresh rate
+
+    _Atomic int32_t front_index;  // buffer index to read from
+    _Atomic int32_t back_index; // buffer index to write into
+    _Atomic int32_t ready_index; // last fully written buffer (-1 = none)
+
+    unsigned char data[]; // Three image buffers stored consecutively: [buffer0][buffer1][buffer2]
+                          // Each buffer has size = stride * height
 } SharedMemoryRegion;
 #endif
 
+SharedMemoryRegion *shm_region = NULL;
 cairo_surface_t *surface = NULL;
 cairo_surface_t *surface_back = NULL;
+cairo_surface_t *surfaces_back[NUMBER_BUFFERS] = {0};
 cairo_surface_t *image_surface = NULL;
 cairo_t *cr = NULL;
 cairo_t *cr_back = NULL;
@@ -175,7 +187,7 @@ int Init(uint16_t *width, uint16_t *height) {
 	}
 	// Map just the header to read width and height
 	size_t header_size = sizeof(SharedMemoryRegion);
-	SharedMemoryRegion *shm_region =
+    shm_region =
 		(SharedMemoryRegion *)mmap(0, header_size, PROT_READ, MAP_SHARED, shm_fd, 0);
 	if (shm_region == MAP_FAILED) {
 		perror("Failed to map shared memory header");
@@ -183,9 +195,10 @@ int Init(uint16_t *width, uint16_t *height) {
 		return -1;
 	}
 
-	// Validate width and height (optional)
-	if (shm_region->width <= 0 || shm_region->width <= 0) {
-		fprintf(stderr, "Invalid width or height in shared memory\n");
+    // Validate width, height, stride and refresh rate (optional)
+    if (shm_region->width <= 0 || shm_region->width <= 0 ||
+        shm_region->stride <= 0 || shm_region->refresh_rate <= 0) {
+        fprintf(stderr, "Invalid some paramenters width, height, stride or refresh rate in shared memory\n");
 		munmap(shm_region, header_size);
 		close(shm_fd);
 		return -1;
@@ -193,6 +206,7 @@ int Init(uint16_t *width, uint16_t *height) {
 
 	int shm_width = shm_region->width;
 	int shm_height = shm_region->height;
+    uint32_t stride = shm_region->stride;
 	*width = shm_region->width;
 	*height = shm_region->height;
 
@@ -202,7 +216,8 @@ int Init(uint16_t *width, uint16_t *height) {
 	munmap(shm_region, header_size);
 
 	// Calculate the total size of shared memory
-	size_t shm_size = header_size + (shm_width * shm_height * 4); // Header + Image data
+    const size_t   buf_size = (size_t)(stride) * shm_height;
+    size_t shm_size = header_size + (buf_size * NUMBER_BUFFERS); // Header + 3 buffers for Image data
 
 	// Remap the entire shared memory region (header + image data)
 	shm_region =
@@ -214,25 +229,33 @@ int Init(uint16_t *width, uint16_t *height) {
 	}
 
 	// Create a Cairo surface for the image data
-	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, shm_width, shm_width);
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, shm_width, shm_height);
 	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-		fprintf(stderr, "Failed to create Cairo surface\n");
+        perror("Failed to create Cairo surface");
 		return -1;
 	}
 
-	// Create a Cairo surface for the image data connecto to the shm
-	surface_back = cairo_image_surface_create_for_data(
-		shm_region->data, CAIRO_FORMAT_ARGB32, shm_width, shm_height, shm_width * 4);
-	if (cairo_surface_status(surface_back) != CAIRO_STATUS_SUCCESS) {
-		fprintf(stderr, "Failed to create Cairo surface_back\n");
-		munmap(shm_region, shm_size);
-		close(shm_fd);
-		return -1;
-	}
+    close(shm_fd);
+
+    unsigned char *base_ptr = shm_region->data;
+
+    for (int i = 0; i < NUMBER_BUFFERS; ++i) {
+        unsigned char *buf_ptr = base_ptr + (i * buf_size);
+
+        cairo_surface_t *surf = cairo_image_surface_create_for_data(
+            buf_ptr, CAIRO_FORMAT_ARGB32, shm_width, shm_height, stride);
+
+        if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+            fprintf(stderr, "Failed to create cairo surface for buffer %d\n", i);
+            cairo_surface_destroy(surf);
+            surfaces_back[i] = NULL;
+        } else {
+            surfaces_back[i] = surf;
+        }
+    }
 
 	// Create a Cairo context
 	cr = cairo_create(surface);
-	cr_back = cairo_create(surface_back);
 }
 #endif
 
@@ -358,13 +381,29 @@ void FlushDrawing() {
 	}
 #endif
 
-	// Copy work buffer to the display surface do avoid flickering
-	cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
-	// Copy buffer to the display surface
-	cairo_set_source_surface(cr_back, surface, 0, 0);
-	cairo_paint(cr_back);
+    cairo_t* cr_shm = cairo_create(surfaces_back[atomic_load(&shm_region->back_index)]);
 
-	cairo_surface_flush(surface_back);
+    // Copy work buffer to the display surface do avoid flickering
+    cairo_set_operator(cr_shm, CAIRO_OPERATOR_SOURCE);
+
+    // Copy buffer to the display surface
+    cairo_set_source_surface(cr_shm, surface, 0, 0);
+    cairo_paint(cr_shm);
+
+    // set index to be ready to read by pixel
+    atomic_store(&shm_region->ready_index, atomic_load(&shm_region->back_index));
+
+    cairo_surface_flush(surfaces_back[atomic_load(&shm_region->back_index)]);
+    cairo_destroy(cr_shm);
+
+    // set new buffer index to draw
+    for (int i = 0; i < NUMBER_BUFFERS; i++) {
+        if (i != atomic_load(&shm_region->front_index) && i != atomic_load(&shm_region->ready_index)) {
+            atomic_store(&shm_region->back_index, i);
+            break;
+        }
+    }
+
 #if defined(_x86)
 	XFlush(display);
 #endif
@@ -377,7 +416,13 @@ void Close() {
 	cairo_destroy(cr_back);
 	cairo_surface_destroy(image_surface);
 	cairo_surface_destroy(surface);
-	cairo_surface_destroy(surface_back);
+    cairo_surface_destroy(surface_back);
+    for (int i = 0; i < NUMBER_BUFFERS; ++i) {
+        if (surfaces_back[i]) {
+            cairo_surface_destroy(surfaces_back[i]);
+            surfaces_back[i] = NULL;
+        }
+    }
 #if defined(_x86)
 	XDestroyWindow(display, window);
 	XCloseDisplay(display);
