@@ -1,8 +1,4 @@
 #include "../../bmp/bitmap.h"
-#include <X11/Xatom.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <cairo/cairo-xlib.h>
 #include <cairo/cairo.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,10 +6,14 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
+#if defined(_x86)
 #include <X11/keysym.h>
 #include <event2/event.h>
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <cairo/cairo-xlib.h>
 
-#if defined(_x86)
 Display *display = NULL;
 Window window;
 Pixmap backbuffer_pixmap;
@@ -26,7 +26,7 @@ Window RootWindow;
 
 #if defined(__ROCKCHIP__)
 #define SHM_NAME "msposd"
-#define NUMBER_BUFFERS 3
+#define SHM_BUFFERS_COUNT 3
 
 // Define the shared memory region structure
 typedef struct {
@@ -42,12 +42,13 @@ typedef struct {
     unsigned char data[]; // Three image buffers stored consecutively: [buffer0][buffer1][buffer2]
                           // Each buffer has size = stride * height
 } SharedMemoryRegion;
-#endif
 
 SharedMemoryRegion *shm_region = NULL;
+cairo_surface_t *surfaces_back[SHM_BUFFERS_COUNT] = {0};
+#endif
+
 cairo_surface_t *surface = NULL;
 cairo_surface_t *surface_back = NULL;
-cairo_surface_t *surfaces_back[NUMBER_BUFFERS] = {0};
 cairo_surface_t *image_surface = NULL;
 cairo_t *cr = NULL;
 cairo_t *cr_back = NULL;
@@ -195,8 +196,8 @@ int Init(uint16_t *width, uint16_t *height) {
 		return -1;
 	}
 
-    // Validate width, height, stride and refresh rate (optional)
-    if (shm_region->width <= 0 || shm_region->width <= 0 ||
+    // Validate width, height, stride and refresh rate
+    if (shm_region->width <= 0 || shm_region->height <= 0 ||
         shm_region->stride <= 0 || shm_region->refresh_rate <= 0) {
         fprintf(stderr, "Invalid some paramenters width, height, stride or refresh rate in shared memory\n");
 		munmap(shm_region, header_size);
@@ -217,7 +218,7 @@ int Init(uint16_t *width, uint16_t *height) {
 
 	// Calculate the total size of shared memory
     const size_t   buf_size = (size_t)(stride) * shm_height;
-    size_t shm_size = header_size + (buf_size * NUMBER_BUFFERS); // Header + 3 buffers for Image data
+    size_t shm_size = header_size + (buf_size * SHM_BUFFERS_COUNT); // Header + 3 buffers for Image data
 
 	// Remap the entire shared memory region (header + image data)
 	shm_region =
@@ -239,7 +240,7 @@ int Init(uint16_t *width, uint16_t *height) {
 
     unsigned char *base_ptr = shm_region->data;
 
-    for (int i = 0; i < NUMBER_BUFFERS; ++i) {
+    for (int i = 0; i < SHM_BUFFERS_COUNT; ++i) {
         unsigned char *buf_ptr = base_ptr + (i * buf_size);
 
         cairo_surface_t *surf = cairo_image_surface_create_for_data(
@@ -379,11 +380,20 @@ void FlushDrawing() {
 			GrabModeAsync,
 			GrabModeAsync); // Alt + Down Arrow
 	}
+
+	// Copy work buffer to the display surface do avoid flickering
+	cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
+	// Copy buffer to the display surface
+	cairo_set_source_surface(cr_back, surface, 0, 0);
+	cairo_paint(cr_back);
+
+	cairo_surface_flush(surface_back);
 #endif
 
+#if defined(__ROCKCHIP__)
     cairo_t* cr_shm = cairo_create(surfaces_back[atomic_load(&shm_region->back_index)]);
 
-    // Copy work buffer to the display surface do avoid flickering
+	// Copy work buffer to the display surface do avoid flickering
     cairo_set_operator(cr_shm, CAIRO_OPERATOR_SOURCE);
 
     // Copy buffer to the display surface
@@ -392,17 +402,18 @@ void FlushDrawing() {
 
     // set index to be ready to read by pixel
     atomic_store(&shm_region->ready_index, atomic_load(&shm_region->back_index));
-
     cairo_surface_flush(surfaces_back[atomic_load(&shm_region->back_index)]);
-    cairo_destroy(cr_shm);
+	cairo_destroy(cr_shm);
 
+    
     // set new buffer index to draw
-    for (int i = 0; i < NUMBER_BUFFERS; i++) {
+    for (int i = 0; i < SHM_BUFFERS_COUNT; i++) {
         if (i != atomic_load(&shm_region->front_index) && i != atomic_load(&shm_region->ready_index)) {
             atomic_store(&shm_region->back_index, i);
             break;
         }
     }
+#endif
 
 #if defined(_x86)
 	XFlush(display);
@@ -412,17 +423,21 @@ void FlushDrawing() {
 
 void Close() {
 	// Clean up resources
-	cairo_destroy(cr);
-	cairo_destroy(cr_back);
-	cairo_surface_destroy(image_surface);
-	cairo_surface_destroy(surface);
-    cairo_surface_destroy(surface_back);
-    for (int i = 0; i < NUMBER_BUFFERS; ++i) {
+	if (cr) cairo_destroy(cr);
+	if (cr_back) cairo_destroy(cr_back);
+	if (image_surface) cairo_surface_destroy(image_surface);
+	if (surface) cairo_surface_destroy(surface);
+	if (surface_back) cairo_surface_destroy(surface_back);
+
+#if defined(__ROCKCHIP__)
+    for (int i = 0; i < SHM_BUFFERS_COUNT; ++i) {
         if (surfaces_back[i]) {
             cairo_surface_destroy(surfaces_back[i]);
             surfaces_back[i] = NULL;
         }
     }
+#endif
+
 #if defined(_x86)
 	XDestroyWindow(display, window);
 	XCloseDisplay(display);
