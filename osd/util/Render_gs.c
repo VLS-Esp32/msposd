@@ -391,7 +391,10 @@ void FlushDrawing() {
 #endif
 
 #if defined(__ROCKCHIP__)
-    cairo_t* cr_shm = cairo_create(surfaces_back[atomic_load(&shm_region->back_index)]);
+
+	int32_t back_index = atomic_load(&shm_region->back_index);  
+	int32_t front_index = atomic_load(&shm_region->front_index); 
+    cairo_t* cr_shm = cairo_create(surfaces_back[back_index]);
 
 	// Copy work buffer to the display surface do avoid flickering
     cairo_set_operator(cr_shm, CAIRO_OPERATOR_SOURCE);
@@ -400,15 +403,14 @@ void FlushDrawing() {
     cairo_set_source_surface(cr_shm, surface, 0, 0);
     cairo_paint(cr_shm);
 
-    // set index to be ready to read by pixel
-    atomic_store(&shm_region->ready_index, atomic_load(&shm_region->back_index));
-    cairo_surface_flush(surfaces_back[atomic_load(&shm_region->back_index)]);
+    // set index to be ready to read
+    cairo_surface_flush(surfaces_back[back_index]);
 	cairo_destroy(cr_shm);
-
-    
+	atomic_store(&shm_region->ready_index, back_index);
+	
     // set new buffer index to draw
     for (int i = 0; i < SHM_BUFFERS_COUNT; i++) {
-        if (i != atomic_load(&shm_region->front_index) && i != atomic_load(&shm_region->ready_index)) {
+       if (i != front_index && i != back_index) {
             atomic_store(&shm_region->back_index, i);
             break;
         }

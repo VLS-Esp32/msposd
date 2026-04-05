@@ -2598,10 +2598,12 @@ static void InitMSPHook() {
 			// free(bitmap.pData);
 		} else { // no font file still, show message on screen
 			cntr = 0;
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 			char msgbuff[120];
 			sprintf(msgbuff, "&F48 &L23 Waiting for data on %s ...", _port_name);
 			SetOSDMsg(msgbuff);
 			draw_screenBMP();
+#endif
 		}
 
 		if (prepared) {
